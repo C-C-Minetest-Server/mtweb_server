@@ -69,12 +69,7 @@ local function onstream(myserver, stream)
 	res_headers:append("server", "MTweb-server")
 	res_headers:append("content-type", "application/json; charset=utf-8")
 
-	local pathseg = {}
-	for seg in string.gmatch(path, '([^/]+)') do
-		table.insert(pathseg,seg)
-	end
 
-	local func = methods[pathseg[1]] or mtweb.NF
 	if req_method == "POST" then
 		local body = stream:get_body_as_string(3)
 
@@ -82,13 +77,37 @@ local function onstream(myserver, stream)
 		for x,y in http_util.query_args(body) do
 			form[x] = y
 		end
+
+		local pathseg = {}
+		for seg in string.gmatch(path, '([^/]+)') do
+			table.insert(pathseg,seg)
+		end
+		local func = methods[pathseg[1]] or mtweb.NF
+
 		local return_data = func(req_method,req_headers,res_headers,pathseg,form)
 		local success_whead = stream:write_headers(res_headers, req_method == "HEAD")
 		if success_whead and req_method ~= "HEAD" then
 			stream:write_chunk(minetest.write_json(return_data), true)
 		end
 	else
-		local return_data = func(req_method,req_headers,res_headers,pathseg)
+		-- find form in URL
+		local qm_pos = string.find(path,"?")
+		local oldpath = path
+		local form = {}
+		if qm_pos then
+			path = string.sub(oldpath, 1, qm_pos-1)
+			local params = string.sub(oldpath, qm_pos+1)
+			for x,y in http_util.query_args(params) do
+				form[x] = y
+			end
+		end
+		local pathseg = {}
+		for seg in string.gmatch(path, '([^/]+)') do
+			table.insert(pathseg,seg)
+		end
+		local func = methods[pathseg[1]] or mtweb.NF
+
+		local return_data = func(req_method,req_headers,res_headers,pathseg,form)
 
 		local success_whead = stream:write_headers(res_headers, req_method == "HEAD")
 		if success_whead and req_method ~= "HEAD" then

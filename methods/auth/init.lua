@@ -90,10 +90,22 @@ return function(params)
 		return true
 	end
 
+	params.auth = {
+		sessions = sessions,
+		token_valid = token_valid,
+		token_occupied = token_occupied,
+		random_token = random_token,
+
+		generate_csrf_token = generate_csrf_token,
+		validate_csrf_token = validate_csrf_token,
+	}
+
 	local MP = minetest.get_modpath("mtweb_server")
 	local auth_handler = minetest.get_auth_handler()
 	local http_cookie = ie_require.require_with_IE_env("http.cookie")
+	params.http_cookie = http_cookie
 	local gendate = dofile(MP .. "/src/gendate.lua")
+	local m_areas = minetest.global_exists("areas") and dofile(MP .. "/methods/auth/areas.lua")(params) or {}
 
 	return {
 		login = function(req_method,req_headers,res_headers,pathseg,form)
@@ -102,11 +114,40 @@ return function(params)
 			end
 			local uname = form.uname
 			local passwd = form.passwd
-			if not(uname and passwd) then
+			if uname == "singleplayer" then
+				if minetest.is_singleplayer() then
+					-- ALlow any login to singleplayer on singleplayer server
+					local token = random_token()
+					local now = os.time()
+					local session = {
+						uname = uname,
+						last_used = now
+					}
+					sessions[token] = session
+					res_headers:append(":status","200")
+					-- http_cookie.bake have problem dealing with non-English locale
+					res_headers:append("set-cookie",string.format("mtweb-login-token=%s; Expires=%s",
+						token,
+						gendate(now + 63072000)
+					))
+					return {
+						success = true,
+						uname = uname,
+						singleplayer = true,U
+					}
+				else
+					-- Do not allow any login to singleplayer in multiplayer server
+					res_headers:append(":status","403")
+					return {
+						success = false,
+						detail = "NO SINGLEPLAYER ACCESS"
+					}
+				end
+			elseif not(uname and passwd) then
 				res_headers:append(":status","400")
 				return {
 					success = false,
-					detail = "Username (uname) or Password (passwd) missing"
+					detail = "NO UNAME/PASSWD"
 				}
 			elseif minetest.check_password_entry(uname, auth_handler.get_auth(uname).password, passwd) then
 				local token = random_token()
@@ -183,7 +224,7 @@ return function(params)
 			local cookies = http_cookie.parse_cookies(req_headers)
 			local token = cookies["mtweb-login-token"]
 			if not validate_csrf_token(form.csrf,token) then
-				res_headers:append(":status", "403")
+				res_headers:append(":status", "401")
 				return {
 					success = false,
 					logout = false,
@@ -244,6 +285,10 @@ return function(params)
 					logout = true,
 				}
 			end
+		end,
+		areas = function(req_method,req_headers,res_headers,pathseg,form)
+			local func = m_areas[pathseg[3]] or mtweb.NF
+			return func(req_method,req_headers,res_headers,pathseg,form)
 		end,
 	}
 end
