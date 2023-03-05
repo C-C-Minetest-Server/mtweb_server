@@ -55,3 +55,8 @@ Get the list of your areas, return a key-value pair of area IDs and area objects
 
 * `admin`: If present and the user is an admin (as defined by areas mod), list all areas instead of only theirs.
 * `upper` and `lower`: List out `upper` to `lower` areas, inclusively.
+
+
+The following error message may be raised:
+
+* `INVALID TOKEN`: The login token is invalid.
