@@ -1,0 +1,9 @@
+# The port MTweb server is binding to.
+# It should be larger than 1024 (as those between 0 and 1024 inclusively are reserved by the superuser),
+# and must not higher than 65535 (that's the protocol's limit).
+mtweb.port (MTweb server port) int 8000 1025 65535
+
+[Authentication]
+# The time, in second, allowed to have no action taken with this token before the token is invalidated.
+# `0` means they will never expire.
+mtweb.auth.idle_limit (Token idle limit) int 300 0 65535
