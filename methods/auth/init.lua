@@ -64,7 +64,7 @@ return function(params)
 
 	local MP = minetest.get_modpath("mtweb_server")
 	local auth_handler = minetest.get_auth_handler()
-	local parse_cookie = dofile(MP .. "/src/parse_cookie.lua")
+	local http_cookie = ie_require.require_with_IE_env("http.cookie")
 	local gendate = dofile(MP .. "/src/gendate.lua")
 
 	return {
@@ -89,7 +89,8 @@ return function(params)
 				}
 				sessions[token] = session
 				res_headers:append(":status","200")
-				res_headers:append("set-cookie",string.format("mtweb-login-token=%s; Expires=%s; Path=/",
+				-- http_cookie.bake have problem dealing with non-English locale
+				res_headers:append("set-cookie",string.format("mtweb-login-token=%s; Expires=%s",
 					token,
 					gendate(now + 63072000)
 				))
@@ -106,14 +107,13 @@ return function(params)
 			end
 		end,
 		whoami = function(req_method,req_headers,res_headers,pathseg)
-			local cookie_header = req_headers:get("cookie") or ""
-			local cookies = parse_cookie(cookie_header)
+			local cookies = http_cookie.parse_cookies(req_headers)
 			local token = cookies["mtweb-login-token"]
 			if not(token and token_valid(token)) then
 				res_headers:append(":status", "401")
 				return {
 					success = false,
-					detail = "TOKEN EXPIRED",
+					detail = "INVALID TOKEN",
 				}
 			else
 				res_headers:append(":status", "200")
@@ -134,8 +134,7 @@ return function(params)
 			if req_method ~= "POST" then
 				return mtweb.METHOD_NOT_ALLOWED("POST")(req_method,req_headers,res_headers)
 			end
-			local cookie_header = req_headers:get("cookie") or ""
-			local cookies = parse_cookie(cookie_header)
+			local cookies = http_cookie.parse_cookies(req_headers)
 			local token = cookies["mtweb-login-token"]
 			local session = sessions[token]
 			if not session then
