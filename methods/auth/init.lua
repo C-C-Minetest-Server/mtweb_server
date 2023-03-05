@@ -62,6 +62,34 @@ return function(params)
 		return ranstr
 	end
 
+	local csrf_tokens = {}
+	local function generate_csrf_token(token) -- TODO: Make use of cryptographic safe methods.
+		local csrf_token = ""
+		for i = 1, 20 do
+			local ranindex = math.random(#chars)
+			csrf_token = csrf_token .. string.sub(chars,ranindex, ranindex)
+		end
+		if csrf_tokens[csrf_token] then -- Don't give a duplicated one, though not likely to happen
+			csrf_token = generate_csrf_token()
+		end
+		csrf_tokens[csrf_token] = {
+			session = token,
+			generated_at = os.time()
+		}
+		return csrf_token
+	end
+	local function validate_csrf_token(csrf_token,token)
+		local entry = csrf_tokens[csrf_token]
+		if not entry then return false end
+		csrf_tokens[csrf_token] = nil -- In all cases, this token has to be invalidated.
+		if os.time() - entry.generated_at > 120 -- CSRF tokens expires in two minutes.
+		   or entry.session ~= token -- Session mismatch
+		   or not token_valid(token) then -- Token expired/logged out
+			return false
+		end
+		return true
+	end
+
 	local MP = minetest.get_modpath("mtweb_server")
 	local auth_handler = minetest.get_auth_handler()
 	local http_cookie = ie_require.require_with_IE_env("http.cookie")
@@ -106,6 +134,24 @@ return function(params)
 				}
 			end
 		end,
+		csrf = function(req_method,req_headers,res_headers,pathseg)
+			local cookies = http_cookie.parse_cookies(req_headers)
+			local token = cookies["mtweb-login-token"]
+			if not(token and token_valid(token)) then
+				res_headers:append(":status", "401")
+				return {
+					success = false,
+					detail = "INVALID TOKEN",
+				}
+			else
+				res_headers:append(":status", "200")
+				local csrf_token = generate_csrf_token(token)
+				return {
+					success = true,
+					csrf = csrf_token,
+				}
+			end
+		end,
 		whoami = function(req_method,req_headers,res_headers,pathseg)
 			local cookies = http_cookie.parse_cookies(req_headers)
 			local token = cookies["mtweb-login-token"]
@@ -130,21 +176,59 @@ return function(params)
 				}
 			end
 		end,
-		logout = function(req_method,req_headers,res_headers,pathseg)
+		chpasswd = function(req_method,req_headers,res_headers,pathseg,form)
 			if req_method ~= "POST" then
 				return mtweb.METHOD_NOT_ALLOWED("POST")(req_method,req_headers,res_headers)
 			end
 			local cookies = http_cookie.parse_cookies(req_headers)
 			local token = cookies["mtweb-login-token"]
-			local session = sessions[token]
-			if not session then
-				res_headers:append(":status", "404")
+			if not validate_csrf_token(form.csrf,token) then
+				res_headers:append(":status", "403")
 				return {
 					success = false,
-					logout = true,
-					details = "TOKEN NOT FOUND",
+					logout = false,
+					details = "INVALID CSRF AND-OR LOGIN TOKEN",
 				}
-			elseif session.logged_out then
+			end
+			local session = sessions[token]
+			local uname = session.uname
+			local new_passwd = form.new_passwd or ""
+			if not minetest.check_password_entry(uname, auth_handler.get_auth(uname).password, form.old_passwd) then
+				res_headers:append(":status", "401")
+				return {
+					success = false,
+					details = "MISMATCH OLD PASSWORD",
+				}
+			elseif new_passwd == "" then
+				res_headers:append(":status", "400")
+				return {
+					success = false,
+					details = "NO NEW PASSWORD",
+				}
+			end
+			local new_pwdhash = minetest.get_password_hash(uname, new_passwd)
+			minetest.set_player_password(uname, new_pwdhash)
+			res_headers:append(":status", "200")
+			return {
+				success = true,
+			}
+		end,
+		logout = function(req_method,req_headers,res_headers,pathseg,form)
+			if req_method ~= "POST" then
+				return mtweb.METHOD_NOT_ALLOWED("POST")(req_method,req_headers,res_headers)
+			end
+			local cookies = http_cookie.parse_cookies(req_headers)
+			local token = cookies["mtweb-login-token"]
+			if not validate_csrf_token(form.csrf,token) then
+				res_headers:append(":status", "403")
+				return {
+					success = false,
+					logout = false,
+					details = "INVALID CSRF AND-OR LOGIN TOKEN",
+				}
+			end
+			local session = sessions[token]
+			if session.logged_out then
 				res_headers:append(":status", "400")
 				return {
 					success = false,
